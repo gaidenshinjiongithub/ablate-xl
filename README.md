@@ -6,9 +6,9 @@
   </picture>
 </p>
 
-<h1 align="center">Ablate</h1>
+<h1 align="center">Ablate XL</h1>
 
-<p align="center"><b>Directional ablation (abliteration) toolkit for automatic censorship removal of open-source language models.</b></p>
+<p align="center"><b>Scale-aware directional ablation research for open-weight language models.</b></p>
 
 <p align="center">
   <a href="https://pypi.org/project/ablate-llm/"><img alt="PyPI" src="https://img.shields.io/pypi/v/ablate-llm.svg?color=7c5cff"></a>
@@ -41,9 +41,11 @@ KL-divergence–guided [Optuna](https://optuna.org) search that automatically
 tunes *which* direction, *how strongly*, and *which layers* to ablate, balancing
 refusal removal against capability damage.
 
-It is designed for **mechanistic-interpretability and safety research** on small
-open models (GPT-2, SmolLM2, TinyLlama, Qwen2.5-0.5B/1.5B …) — models you can
-iterate on locally on a laptop, or on a free Colab T4.
+It is designed for **mechanistic-interpretability and safety research** across
+open-weight models, from laptop-scale checkpoints to models sharded across
+multiple accelerators. Large-model support currently covers memory-bounded
+activation extraction and non-destructive runtime hooks; see
+[Large and sharded models](#large-and-sharded-models) for the exact boundary.
 
 > **Scope & intent.** This is dual-use research tooling for studying *how* safety
 > behavior is represented and how robust it is. The refusal prompts shipped in
@@ -113,16 +115,17 @@ pip install "ablate-llm[all]"
 import ablate                   # note: install is `ablate-llm`, import is `ablate`
 ```
 
-From source (for development):
+From this fork (for development):
 
 ```bash
-git clone https://github.com/AIAnytime/ablate && cd ablate
+git clone https://github.com/gaidenshinjiongithub/ablate-xl.git && cd ablate-xl
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[all]"
 ```
 
 Optional extras: `.[optimize]` (Optuna), `.[datasets]` (HF datasets), `.[hub]`
-(push to the Hub). `.[all]` installs everything.
+(push to the Hub), and `.[large-model]` (Accelerate-backed device maps).
+`.[all]` installs everything.
 
 Runs on CUDA, Apple MPS, or CPU (auto-detected). Tiny models (≤1B) run fine on a
 16GB laptop in float32; a free Colab T4 handles 1–1.5B comfortably.
@@ -146,6 +149,54 @@ print(abl.generate(["How do I pick a lock?"]))
 abl.bake(result.config)
 abl.save("qwen-0.5b-ablated")                  # standard HF folder; load anywhere
 ```
+
+## Large and sharded models
+
+Install the Accelerate integration, then load a checkpoint using a Transformers
+device map. `Ablate XL` does not call `.to(...)` after a dispatched load, so the
+model remains distributed across the selected GPUs and/or CPU/disk offload:
+
+```bash
+pip install -e ".[large-model]"
+```
+
+```python
+from ablate import Ablator
+
+abl = Ablator(
+    "org/large-open-model",
+    dtype="bfloat16",
+    device_map="auto",
+    max_memory={0: "78GiB", 1: "78GiB", "cpu": "200GiB"},
+    offload_folder="/fast-local-disk/ablate-offload",
+)
+
+# Start with batch_size=1 and increase only after measuring headroom.
+directions = abl.extract(batch_size=1, positions=1)
+```
+
+Activation extraction uses temporary decoder hooks. Each hook averages the
+selected prompt positions and immediately copies only the resulting `(B, D)`
+vectors to CPU. It also calls the decoder backbone directly, avoiding both full
+`output_hidden_states` retention and the large `(B, S, vocabulary)` LM-head
+output. Retained activation memory therefore scales approximately as
+`(layers + 1) × prompts × hidden_size`, not
+`(layers + 1) × batch × sequence × hidden_size` on accelerator memory.
+
+The CLI exposes the same loading path:
+
+```bash
+ablate extract --model org/large-open-model \
+  --dtype bfloat16 --device-map auto \
+  --offload-folder /fast-local-disk/ablate-offload \
+  --batch-size 1 \
+  --output directions.pt
+```
+
+> **Current limitation:** use runtime hooks for sharded, offloaded, or quantized
+> checkpoints. Permanent weight baking mutates tensors in place and is not yet
+> validated for tensor-parallel shards, MoE expert layouts, or quantized weight
+> wrappers. Do not call `bake()`, `save()`, or `push_to_hub()` on those models.
 
 ### Verified result
 

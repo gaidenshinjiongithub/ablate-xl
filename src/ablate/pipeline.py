@@ -41,8 +41,27 @@ class Ablator:
         abl.save("uncensored-model")
     """
 
-    def __init__(self, model_name: str, device=None, dtype=None, trust_remote_code=False):
-        self.lm = LM.load(model_name, device=device, dtype=dtype, trust_remote_code=trust_remote_code)
+    def __init__(
+        self,
+        model_name: str,
+        device=None,
+        dtype=None,
+        trust_remote_code=False,
+        device_map=None,
+        max_memory=None,
+        offload_folder=None,
+        model_kwargs=None,
+    ):
+        self.lm = LM.load(
+            model_name,
+            device=device,
+            dtype=dtype,
+            trust_remote_code=trust_remote_code,
+            device_map=device_map,
+            max_memory=max_memory,
+            offload_folder=offload_folder,
+            model_kwargs=model_kwargs,
+        )
         self.directions: Optional[torch.Tensor] = None
         self.subspace: Optional[torch.Tensor] = None
         self.subspace_info: Optional[dict] = None
@@ -114,6 +133,7 @@ class Ablator:
         max_new_tokens: int = 64,
         kl_weight: float = 1.0,
         keep_samples: bool = True,
+        batch_size: int = 8,
     ) -> EvalResult:
         assert self.directions is not None, "call extract() first"
         return evaluate(
@@ -125,6 +145,7 @@ class Ablator:
             max_new_tokens=max_new_tokens,
             kl_weight=kl_weight,
             keep_samples=keep_samples,
+            batch_size=batch_size,
         )
 
     # -- optimization ------------------------------------------------------- #
@@ -136,6 +157,7 @@ class Ablator:
         kl_weight: float = 1.0,
         max_new_tokens: int = 48,
         seed: int = 0,
+        batch_size: int = 8,
     ) -> SearchResult:
         assert self.directions is not None, "call extract() first"
         if harmful_eval is None:
@@ -151,6 +173,7 @@ class Ablator:
             kl_weight=kl_weight,
             max_new_tokens=max_new_tokens,
             seed=seed,
+            batch_size=batch_size,
         )
         self.best_config = res.config
         self.last_metrics = _metrics_of(res.result)
@@ -164,6 +187,7 @@ class Ablator:
         kl_weight: float = 1.0,
         max_new_tokens: int = 48,
         seed: int = 0,
+        batch_size: int = 8,
     ) -> SubspaceSearchResult:
         """KL-guided search over (n_directions, alpha, layer-band) for the subspace."""
         assert self.subspace is not None, "call extract_subspace() first"
@@ -174,6 +198,7 @@ class Ablator:
         res = optimize_subspace(
             self.lm, self.subspace, harmful_eval, benign_eval,
             n_trials=n_trials, kl_weight=kl_weight, max_new_tokens=max_new_tokens, seed=seed,
+            batch_size=batch_size,
         )
         self.best_config = res.config
         self.last_metrics = _metrics_of(res.result)
@@ -186,6 +211,7 @@ class Ablator:
         judge: Optional[object] = None,
         config: Optional[Union[AblationConfig, SubspaceConfig]] = None,
         max_new_tokens: int = 128,
+        batch_size: int = 8,
     ) -> HarnessResult:
         """Run a harmful benchmark through a judge. Pass ``config`` (or rely on
         ``best_config``) to score the ablated model; pass ``config=None`` and no
@@ -193,15 +219,29 @@ class Ablator:
         cfg = config or self.best_config
         basis = self._basis_for(cfg) if cfg is not None else None
         return run_harness(self.lm, prompts, judge=judge, basis=basis, config=cfg,
-                           max_new_tokens=max_new_tokens)
+                           max_new_tokens=max_new_tokens, batch_size=batch_size)
 
     # -- generation (with a live, non-destructive ablation) ----------------- #
-    def generate(self, prompts: List[str], config=None, max_new_tokens: int = 128) -> List[str]:
+    def generate(
+        self,
+        prompts: List[str],
+        config=None,
+        max_new_tokens: int = 128,
+        batch_size: Optional[int] = None,
+    ) -> List[str]:
         config = config or self.best_config
         if config is None:
-            return self.lm.generate(prompts, max_new_tokens=max_new_tokens)
+            return self.lm.generate(
+                prompts,
+                max_new_tokens=max_new_tokens,
+                batch_size=batch_size,
+            )
         with AblationHooks(self.lm, self._basis_for(config), config):
-            return self.lm.generate(prompts, max_new_tokens=max_new_tokens)
+            return self.lm.generate(
+                prompts,
+                max_new_tokens=max_new_tokens,
+                batch_size=batch_size,
+            )
 
     # -- baking + saving ---------------------------------------------------- #
     def bake(self, config=None, include_embedding: bool = True) -> None:
@@ -293,7 +333,14 @@ def run(cfg: RunConfig):
     sources, and optional push to the Hub. Returns the search result.
     """
     utils.set_seed(cfg.seed)
-    abl = Ablator(cfg.model_name, device=cfg.device, dtype=cfg.dtype)
+    abl = Ablator(
+        cfg.model_name,
+        device=cfg.device,
+        dtype=cfg.dtype,
+        device_map=cfg.device_map,
+        offload_folder=cfg.offload_folder,
+        trust_remote_code=cfg.trust_remote_code,
+    )
 
     harmful = _load_source(cfg.harmful_source, "harmful", cfg.n_harmful + cfg.n_eval_harmful, cfg.seed)
     harmless = _load_source(cfg.harmless_source, "harmless", cfg.n_harmless + cfg.n_eval_benign, cfg.seed)
@@ -305,11 +352,13 @@ def run(cfg: RunConfig):
                              n_directions=cfg.n_directions, positions=cfg.extract_positions,
                              batch_size=cfg.batch_size)
         result = abl.search_subspace(harmful_eval=h_eval, benign_eval=s_eval, n_trials=cfg.n_trials,
-                                     kl_weight=cfg.kl_weight, max_new_tokens=cfg.max_new_tokens, seed=cfg.seed)
+                                     kl_weight=cfg.kl_weight, max_new_tokens=cfg.max_new_tokens,
+                                     seed=cfg.seed, batch_size=cfg.batch_size)
     else:
         abl.extract(harmful=h_train, harmless=s_train, positions=cfg.extract_positions, batch_size=cfg.batch_size)
         result = abl.search(harmful_eval=h_eval, benign_eval=s_eval, n_trials=cfg.n_trials,
-                            kl_weight=cfg.kl_weight, max_new_tokens=cfg.max_new_tokens, seed=cfg.seed)
+                            kl_weight=cfg.kl_weight, max_new_tokens=cfg.max_new_tokens,
+                            seed=cfg.seed, batch_size=cfg.batch_size)
 
     os.makedirs(cfg.output_dir, exist_ok=True)
     with open(os.path.join(cfg.output_dir, "result.json"), "w") as f:
