@@ -91,15 +91,21 @@ class LM:
     def format(self, prompt: str, system: Optional[str] = None) -> str:
         """Apply the model's chat template when available (needed to elicit
         refusals from instruct models); otherwise return the raw prompt."""
-        tmpl = getattr(self.tokenizer, "chat_template", None)
-        if tmpl:
+        apply_template = getattr(self.tokenizer, "apply_chat_template", None)
+        if callable(apply_template):
             messages = []
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
-            return self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
+            try:
+                # Some remote-code tokenizers (including Kimi K3) implement
+                # this method directly without populating ``chat_template``.
+                return apply_template(messages, tokenize=False, add_generation_prompt=True)
+            except ValueError as exc:
+                # Standard Transformers tokenizers expose the method even when
+                # no template exists. Preserve raw-prompt behavior only then.
+                if "chat template" not in str(exc).lower():
+                    raise
         return prompt
 
     def tokenize(self, prompts: List[str], system: Optional[str] = None):

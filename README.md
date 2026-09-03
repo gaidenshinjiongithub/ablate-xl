@@ -152,6 +152,10 @@ abl.save("qwen-0.5b-ablated")                  # standard HF folder; load anywhe
 
 ## Large and sharded models
 
+Running on RunPod? Use the guarded, no-PyPI
+[`runpod/` workflow](runpod/README.md) for single-host frontier checkpoints,
+including the Kimi K3 profile and Qwen3.8 FP8 feasibility gate.
+
 Install the Accelerate integration, then load a checkpoint using a Transformers
 device map. `Ablate XL` does not call `.to(...)` after a dispatched load, so the
 model remains distributed across the selected GPUs and/or CPU/disk offload:
