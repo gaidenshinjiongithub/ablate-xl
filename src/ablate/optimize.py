@@ -47,6 +47,7 @@ def optimize(
     layer_lo: Optional[int] = None,
     layer_hi: Optional[int] = None,
     show_progress: bool = True,
+    batch_size: int = 8,
 ) -> SearchResult:
     try:
         import optuna
@@ -87,6 +88,7 @@ def optimize(
             benign_eval,
             max_new_tokens=max_new_tokens,
             kl_weight=kl_weight,
+            batch_size=batch_size,
         )
         # Penalize incoherent solutions so they never win the search.
         penalty = 0.0 if res.coherence >= coherence_floor else (coherence_floor - res.coherence) * 5.0
@@ -114,6 +116,7 @@ def optimize(
         max_new_tokens=max_new_tokens,
         kl_weight=kl_weight,
         keep_samples=True,
+        batch_size=batch_size,
     )
     return SearchResult(config=best_cfg, result=best_res, history=history)
 
@@ -129,6 +132,7 @@ def optimize_subspace(
     coherence_floor: float = 0.3,
     seed: int = 0,
     show_progress: bool = True,
+    batch_size: int = 8,
 ) -> SubspaceSearchResult:
     """Search over ``(n_directions, alpha, layer_band)`` for subspace ablation.
 
@@ -157,6 +161,7 @@ def optimize_subspace(
         res = evaluate(
             lm, basis[:n_dir], cfg, harmful_eval, benign_eval,
             max_new_tokens=max_new_tokens, kl_weight=kl_weight,
+            batch_size=batch_size,
         )
         penalty = 0.0 if res.coherence >= coherence_floor else (coherence_floor - res.coherence) * 5.0
         score = res.objective + penalty
@@ -174,5 +179,6 @@ def optimize_subspace(
     best_res = evaluate(
         lm, basis[:best_cfg.n_directions], best_cfg, harmful_eval, benign_eval,
         max_new_tokens=max_new_tokens, kl_weight=kl_weight, keep_samples=True,
+        batch_size=batch_size,
     )
     return SubspaceSearchResult(config=best_cfg, result=best_res, history=history)

@@ -121,7 +121,11 @@ def evaluate(
     """Full evaluation of one ablation configuration."""
     # 1. Refusal behaviour on harmful prompts (with ablation active).
     with AblationHooks(lm, direction, config):
-        gens = lm.generate(harmful_prompts, max_new_tokens=max_new_tokens)
+        gens = lm.generate(
+            harmful_prompts,
+            max_new_tokens=max_new_tokens,
+            batch_size=batch_size,
+        )
     rr = refusal_rate(gens)
     coh = sum(_coherence(g) for g in gens) / max(1, len(gens))
 

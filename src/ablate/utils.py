@@ -77,6 +77,31 @@ def get_decoder_layers(model: nn.Module) -> nn.ModuleList:
     )
 
 
+def get_decoder_backbone(model: nn.Module) -> nn.Module:
+    """Return the decoder module that can run without materializing LM logits.
+
+    Activation extraction only needs residual-stream values. Calling the
+    backbone directly avoids allocating a potentially very large ``B x S x V``
+    logits tensor, which matters for large-vocabulary and sharded models.
+    """
+    if hasattr(model, "model") and hasattr(model.model, "layers"):
+        return model.model
+    if hasattr(model, "transformer") and hasattr(model.transformer, "h"):
+        return model.transformer
+    if hasattr(model, "gpt_neox") and hasattr(model.gpt_neox, "layers"):
+        return model.gpt_neox
+    if (
+        hasattr(model, "model")
+        and hasattr(model.model, "decoder")
+        and hasattr(model.model.decoder, "layers")
+    ):
+        return model.model.decoder
+    raise ValueError(
+        f"Could not locate decoder backbone for {type(model).__name__}. "
+        "Add an adapter in utils.get_decoder_backbone."
+    )
+
+
 def num_layers(model: nn.Module) -> int:
     return len(get_decoder_layers(model))
 

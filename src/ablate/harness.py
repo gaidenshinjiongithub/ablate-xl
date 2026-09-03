@@ -43,6 +43,7 @@ def run_harness(
     max_new_tokens: int = 128,
     keep_outputs: bool = True,
     judge_name: str = "keyword",
+    batch_size: int = 8,
 ) -> HarnessResult:
     """Generate over ``prompts`` (optionally under ablation) and score with a judge.
 
@@ -60,9 +61,17 @@ def run_harness(
 
     if basis is not None and config is not None:
         with AblationHooks(lm, basis, config):
-            responses = lm.generate(prompts, max_new_tokens=max_new_tokens)
+            responses = lm.generate(
+                prompts,
+                max_new_tokens=max_new_tokens,
+                batch_size=batch_size,
+            )
     else:
-        responses = lm.generate(prompts, max_new_tokens=max_new_tokens)
+        responses = lm.generate(
+            prompts,
+            max_new_tokens=max_new_tokens,
+            batch_size=batch_size,
+        )
 
     verdicts = judge.score_batch(prompts, responses)
     asr = sum(verdicts) / len(verdicts) if verdicts else 0.0
@@ -84,11 +93,20 @@ def compare(
     config: Union[AblationConfig, SubspaceConfig],
     judge: Optional[Union[Judge, str]] = None,
     max_new_tokens: int = 128,
+    batch_size: int = 8,
 ) -> dict:
     """Baseline vs ablated ASR/refusal on the same benchmark."""
-    base = run_harness(lm, prompts, judge=judge, max_new_tokens=max_new_tokens, keep_outputs=False)
+    base = run_harness(
+        lm,
+        prompts,
+        judge=judge,
+        max_new_tokens=max_new_tokens,
+        keep_outputs=False,
+        batch_size=batch_size,
+    )
     abl = run_harness(lm, prompts, judge=judge, basis=basis, config=config,
-                      max_new_tokens=max_new_tokens, keep_outputs=False)
+                      max_new_tokens=max_new_tokens, keep_outputs=False,
+                      batch_size=batch_size)
     return {
         "judge": base.judge,
         "baseline": base.summary(),

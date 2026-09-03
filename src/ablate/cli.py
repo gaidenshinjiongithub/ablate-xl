@@ -13,7 +13,36 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--model", default="HuggingFaceTB/SmolLM2-135M-Instruct")
     p.add_argument("--device", default=None, help="cuda|mps|cpu (auto if unset)")
     p.add_argument("--dtype", default=None, help="float32|float16|bfloat16 (auto if unset)")
+    p.add_argument(
+        "--device-map",
+        default=None,
+        choices=["auto", "balanced", "balanced_low_0", "sequential"],
+        help="Accelerate device map for sharded/offloaded large-model loading",
+    )
+    p.add_argument(
+        "--offload-folder",
+        default=None,
+        help="folder for disk-offloaded weights used by --device-map",
+    )
+    p.add_argument("--batch-size", type=int, default=8, help="extraction/evaluation batch size")
+    p.add_argument(
+        "--extract-positions",
+        type=int,
+        default=1,
+        help="number of trailing prompt positions to average during extraction",
+    )
     p.add_argument("--trust-remote-code", action="store_true")
+
+
+def _load_ablator(args: argparse.Namespace) -> Ablator:
+    return Ablator(
+        args.model,
+        device=args.device,
+        dtype=args.dtype,
+        trust_remote_code=args.trust_remote_code,
+        device_map=args.device_map,
+        offload_folder=args.offload_folder,
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -21,7 +50,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         model_name=args.model,
         device=args.device,
         dtype=args.dtype,
+        device_map=args.device_map,
+        offload_folder=args.offload_folder,
+        trust_remote_code=args.trust_remote_code,
         seed=args.seed,
+        batch_size=args.batch_size,
+        extract_positions=args.extract_positions,
         n_trials=args.trials,
         kl_weight=args.kl_weight,
         max_new_tokens=args.max_new_tokens,
@@ -50,16 +84,20 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
-    abl = Ablator(args.model, device=args.device, dtype=args.dtype, trust_remote_code=args.trust_remote_code)
-    dirs = abl.extract(method=args.method)
+    abl = _load_ablator(args)
+    dirs = abl.extract(
+        method=args.method,
+        positions=args.extract_positions,
+        batch_size=args.batch_size,
+    )
     abl.save_directions(args.output)
     print(f"Extracted directions {tuple(dirs.shape)} via '{args.method}' -> {args.output}")
     return 0
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
-    abl = Ablator(args.model, device=args.device, dtype=args.dtype, trust_remote_code=args.trust_remote_code)
-    abl.extract()
+    abl = _load_ablator(args)
+    abl.extract(positions=args.extract_positions, batch_size=args.batch_size)
     # Default to the middle layer's direction, applied to all layers — the
     # standard single-direction abliteration setup.
     layer = args.layer if args.layer is not None else abl.lm.n_layers // 2
@@ -76,7 +114,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
     from . import data
     from .harness import compare
 
-    abl = Ablator(args.model, device=args.device, dtype=args.dtype, trust_remote_code=args.trust_remote_code)
+    abl = _load_ablator(args)
 
     # Benchmark prompts.
     if args.benchmark == "builtin":
@@ -92,14 +130,26 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
     # Find a config to evaluate (quick search on built-in eval data).
     if args.subspace:
-        abl.extract_subspace(n_directions=args.n_directions)
-        res = abl.search_subspace(n_trials=args.trials)
+        abl.extract_subspace(
+            n_directions=args.n_directions,
+            positions=args.extract_positions,
+            batch_size=args.batch_size,
+        )
+        res = abl.search_subspace(n_trials=args.trials, batch_size=args.batch_size)
     else:
-        abl.extract()
-        res = abl.search(n_trials=args.trials)
+        abl.extract(positions=args.extract_positions, batch_size=args.batch_size)
+        res = abl.search(n_trials=args.trials, batch_size=args.batch_size)
 
     basis = abl._basis_for(res.config)
-    out = compare(abl.lm, prompts, basis, res.config, judge=args.judge, max_new_tokens=args.max_new_tokens)
+    out = compare(
+        abl.lm,
+        prompts,
+        basis,
+        res.config,
+        judge=args.judge,
+        max_new_tokens=args.max_new_tokens,
+        batch_size=args.batch_size,
+    )
     print(json.dumps(out, indent=2))
     return 0
 

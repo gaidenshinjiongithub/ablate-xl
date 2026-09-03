@@ -12,7 +12,7 @@ ablation.
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List, Tuple
 
 import torch
 
@@ -45,15 +45,23 @@ class AblationHooks:
         self.basis = orthonormalize(as_basis(basis))
         self.config = config
         self._handles: List[torch.utils.hooks.RemovableHandle] = []
+        self._basis_cache: Dict[Tuple[torch.device, torch.dtype], torch.Tensor] = {}
+
+    def _basis_for(self, hidden: torch.Tensor) -> torch.Tensor:
+        key = (hidden.device, hidden.dtype)
+        if key not in self._basis_cache:
+            self._basis_cache[key] = self.basis.to(
+                dtype=hidden.dtype,
+                device=hidden.device,
+            )
+        return self._basis_cache[key]
 
     def _make_hook(self, alpha: float):
-        Q = self.basis
-
         def hook(module, inputs, output):
             if isinstance(output, tuple):
-                h = project_subspace(output[0], Q, alpha)
+                h = project_subspace(output[0], self._basis_for(output[0]), alpha)
                 return (h,) + tuple(output[1:])
-            return project_subspace(output, Q, alpha)
+            return project_subspace(output, self._basis_for(output), alpha)
 
         return hook
 
@@ -72,6 +80,7 @@ class AblationHooks:
         for h in self._handles:
             h.remove()
         self._handles = []
+        self._basis_cache = {}
 
 
 def ablated(lm: LM, basis: torch.Tensor, config: AblationConfig) -> AblationHooks:

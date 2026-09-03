@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ablate-llm"
 version = "0.2.0"
-description = "Directional ablation (abliteration) toolkit for open-source language models: extract, ablate, and optimize the removal of refusal / behavioral directions in the residual stream."
+description = "Scale-aware directional ablation toolkit for open-weight language models."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -33,17 +33,18 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/AIAnytime/ablate"
-Repository = "https://github.com/AIAnytime/ablate"
-Issues = "https://github.com/AIAnytime/ablate/issues"
+Homepage = "https://github.com/gaidenshinjiongithub/ablate-xl"
+Repository = "https://github.com/gaidenshinjiongithub/ablate-xl"
+Issues = "https://github.com/gaidenshinjiongithub/ablate-xl/issues"
 "Example model" = "https://huggingface.co/ai-anytime/qwen-1.5b-abliterated"
 
 [project.optional-dependencies]
 optimize = ["optuna>=3.4"]
 datasets = ["datasets>=2.18"]
 hub = ["huggingface_hub>=0.23"]
-all = ["optuna>=3.4", "datasets>=2.18", "huggingface_hub>=0.23"]
-dev = ["pytest>=7.4", "optuna>=3.4", "datasets>=2.18", "huggingface_hub>=0.23", "matplotlib>=3.7", "Pillow>=10.0"]
+large-model = ["accelerate>=0.26"]
+all = ["accelerate>=0.26", "optuna>=3.4", "datasets>=2.18", "huggingface_hub>=0.23"]
+dev = ["accelerate>=0.26", "pytest>=7.4", "optuna>=3.4", "datasets>=2.18", "huggingface_hub>=0.23", "matplotlib>=3.7", "Pillow>=10.0"]
 
 [project.scripts]
 ablate = "ablate.cli:main"

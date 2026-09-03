@@ -72,6 +72,9 @@ class RunConfig:
     model_name: str = "HuggingFaceTB/SmolLM2-135M-Instruct"
     device: Optional[str] = None
     dtype: Optional[str] = None
+    device_map: Optional[str] = None
+    offload_folder: Optional[str] = None
+    trust_remote_code: bool = False
     seed: int = 0
 
     # data
