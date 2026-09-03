@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from ablate.extract import collect_activations
 from ablate.model import LM
+from ablate import utils
 from ablate.weights import bake_subspace
 
 
@@ -175,3 +176,29 @@ def test_baking_rejects_sharded_model_before_mutation():
         raise AssertionError("sharded baking should fail")
 
     assert torch.equal(model.get_input_embeddings().weight, original)
+
+
+def test_kimi_k3_multimodal_wrapper_resolves_text_backbone():
+    text_backbone = _Backbone()
+    model = SimpleNamespace(
+        language_model=SimpleNamespace(model=text_backbone),
+        config=SimpleNamespace(text_config=SimpleNamespace(hidden_size=7168)),
+    )
+
+    assert utils.get_decoder_layers(model) is text_backbone.layers
+    assert utils.get_decoder_backbone(model) is text_backbone
+    assert utils.hidden_size(model) == 7168
+
+
+def test_custom_tokenizer_renderer_works_without_chat_template_field():
+    class CustomTokenizer(_Tokenizer):
+        chat_template = None
+
+        def apply_chat_template(self, messages, tokenize, add_generation_prompt):
+            assert tokenize is False
+            assert add_generation_prompt is True
+            return "<custom>" + messages[-1]["content"]
+
+    lm = LM(_CausalLM(), CustomTokenizer(), torch.device("cpu"), torch.float32, "kimi")
+
+    assert lm.format("hello") == "<custom>hello"

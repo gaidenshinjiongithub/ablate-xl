@@ -59,6 +59,13 @@ def set_seed(seed: int) -> None:
 def get_decoder_layers(model: nn.Module) -> nn.ModuleList:
     """Return the ModuleList of transformer decoder blocks for common families."""
     m = model
+    # Kimi K3 multimodal wrapper -> text causal LM -> decoder backbone.
+    if (
+        hasattr(m, "language_model")
+        and hasattr(m.language_model, "model")
+        and hasattr(m.language_model.model, "layers")
+    ):
+        return m.language_model.model.layers
     # Llama / Mistral / Qwen2 / SmolLM2 / Gemma / Phi ...
     if hasattr(m, "model") and hasattr(m.model, "layers"):
         return m.model.layers
@@ -84,6 +91,12 @@ def get_decoder_backbone(model: nn.Module) -> nn.Module:
     backbone directly avoids allocating a potentially very large ``B x S x V``
     logits tensor, which matters for large-vocabulary and sharded models.
     """
+    if (
+        hasattr(model, "language_model")
+        and hasattr(model.language_model, "model")
+        and hasattr(model.language_model.model, "layers")
+    ):
+        return model.language_model.model
     if hasattr(model, "model") and hasattr(model.model, "layers"):
         return model.model
     if hasattr(model, "transformer") and hasattr(model.transformer, "h"):
@@ -107,7 +120,14 @@ def num_layers(model: nn.Module) -> int:
 
 
 def hidden_size(model: nn.Module) -> int:
-    return int(model.config.hidden_size) if hasattr(model.config, "hidden_size") else int(model.config.n_embd)
+    config = model.config
+    if hasattr(config, "hidden_size"):
+        return int(config.hidden_size)
+    if hasattr(config, "text_config") and hasattr(config.text_config, "hidden_size"):
+        return int(config.text_config.hidden_size)
+    if hasattr(config, "n_embd"):
+        return int(config.n_embd)
+    raise ValueError(f"Could not determine hidden size for {type(model).__name__}")
 
 
 def get_embedding(model: nn.Module) -> nn.Embedding:
